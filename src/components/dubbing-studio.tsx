@@ -52,7 +52,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
 import {
@@ -92,6 +91,10 @@ const EXAMPLE_SCRIPT = `[0:00:00.880] Almost all of us just use Claude as a chat
 [0:06:52.280]`;
 
 type JobStatusValue = JobDTO["status"];
+
+/** Native scroll container: hard-clipped height + slim custom scrollbar (RTL-safe). */
+const SCROLL_BOX_CLS =
+  "overflow-y-auto [scrollbar-width:thin] [scrollbar-color:#a8a29e_#f5f5f4] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-stone-100 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-300 hover:[&::-webkit-scrollbar-thumb]:bg-stone-400";
 
 function JobStatusBadge({ status }: { status: JobStatusValue }) {
   if (status === "processing") {
@@ -578,7 +581,12 @@ export function DubbingStudio() {
                     )}
 
                     {/* Segments preview */}
-                    <ScrollArea className="max-h-80 rounded-md border border-stone-200">
+                    <div
+                      className={cn(
+                        "max-h-80 rounded-md border border-stone-200",
+                        SCROLL_BOX_CLS
+                      )}
+                    >
                       <Table>
                         <TableHeader>
                           <TableRow className="bg-stone-50 hover:bg-stone-50">
@@ -616,7 +624,7 @@ export function DubbingStudio() {
                           ))}
                         </TableBody>
                       </Table>
-                    </ScrollArea>
+                    </div>
                   </div>
                 )}
               </CardContent>
@@ -881,7 +889,12 @@ export function DubbingStudio() {
                         <ListMusic className="h-3.5 w-3.5" aria-hidden />
                         المقاطع ({job.segments.length})
                       </p>
-                      <ScrollArea className="max-h-96 rounded-md border border-stone-200 bg-stone-50/50">
+                      <div
+                        className={cn(
+                          "max-h-96 rounded-md border border-stone-200 bg-stone-50/50",
+                          SCROLL_BOX_CLS
+                        )}
+                      >
                         <div className="divide-y divide-stone-100 px-2 py-1">
                           {job.segments.map((seg) => {
                             const active =
@@ -943,7 +956,7 @@ export function DubbingStudio() {
                             );
                           })}
                         </div>
-                      </ScrollArea>
+                      </div>
                     </div>
                   )}
                 </CardContent>
