@@ -1,0 +1,955 @@
+     1→"use client";
+     2→
+     3→import { useEffect, useRef, useState } from "react";
+     4→import {
+     5→  Activity,
+     6→  AudioLines,
+     7→  CheckCircle2,
+     8→  ChevronDown,
+     9→  Clock,
+    10→  Download,
+    11→  Eraser,
+    12→  FileAudio,
+    13→  FileSearch,
+    14→  ListMusic,
+    15→  Loader2,
+    16→  Play,
+    17→  RotateCcw,
+    18→  Settings2,
+    19→  Sparkles,
+    20→  Square,
+    21→  TriangleAlert,
+    22→  XCircle,
+    23→} from "lucide-react";
+    24→import { toast } from "sonner";
+    25→
+    26→import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+    27→import { Badge } from "@/components/ui/badge";
+    28→import { Button } from "@/components/ui/button";
+    29→import {
+    30→  Card,
+    31→  CardContent,
+    32→  CardDescription,
+    33→  CardHeader,
+    34→  CardTitle,
+    35→} from "@/components/ui/card";
+    36→import {
+    37→  Collapsible,
+    38→  CollapsibleContent,
+    39→  CollapsibleTrigger,
+    40→} from "@/components/ui/collapsible";
+    41→import { Input } from "@/components/ui/input";
+    42→import { Label } from "@/components/ui/label";
+    43→import { Progress } from "@/components/ui/progress";
+    44→import { ScrollArea } from "@/components/ui/scroll-area";
+    45→import { Separator } from "@/components/ui/separator";
+    46→import { Slider } from "@/components/ui/slider";
+    47→import {
+    48→  Table,
+    49→  TableBody,
+    50→  TableCell,
+    51→  TableHead,
+    52→  TableHeader,
+    53→  TableRow,
+    54→} from "@/components/ui/table";
+    55→import { Textarea } from "@/components/ui/textarea";
+    56→import { Toaster } from "@/components/ui/sonner";
+    57→import { cn } from "@/lib/utils";
+    58→import {
+    59→  DEFAULT_API_KEY,
+    60→  DEFAULT_REFERENCE_ID,
+    61→  FISH_CONFIG,
+    62→  type CreateJobResponse,
+    63→  type JobDTO,
+    64→  type ParseResponse,
+    65→  type SegmentDTO,
+    66→  formatMs,
+    67→  formatShort,
+    68→} from "@/lib/dubbing/types";
+    69→
+    70→const EXAMPLE_SCRIPT = `[0:00:00.880] Almost all of us just use Claude as a chatbot. But today, I want to see what happens
+    71→[0:00:06.759] when I let Claude run a complete creative workflow by itself. I'll give Claude Opus 5.5 a simple idea,
+    72→[0:00:14.320] connect it to Higgsfield through MCP, and let it plan the project and render
+    73→[0:00:20.160] the content, review the results, and fix everything by itself.
+    74→[0:00:28.080] For the Higgsfield MCP link, all you have to do is click the link I'll leave in the description
+    75→[0:00:34.280] and in the first comment. Click Connect Higgsfield. It'll take you to the Higgsfield page
+    76→[0:00:41.440] for your account. Then just click Allow. And that's it. You've connected Higgsfield MCP to Claude.
+    77→[0:00:50.840] Now let's give it the full prompt. Then I'll hit Send right here,
+    78→[0:00:57.359] and it'll start calling the MCP inside Higgsfield. It'll start working on the project,
+    79→[0:00:57.359] and it'll start calling the MCP inside Higgsfield,
+    80→[0:01:03.920] planning it, reviewing it by itself, and creating a complete cinematic project for me.
+    81→[0:06:52.280]`;
+    82→
+    83→type JobStatusValue = JobDTO["status"];
+    84→
+    85→function JobStatusBadge({ status }: { status: JobStatusValue }) {
+    86→  if (status === "processing") {
+    87→    return (
+    88→      <Badge className="border-amber-200 bg-amber-100 text-amber-800 hover:bg-amber-100">
+    89→        <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+    90→        جاري التوليد…
+    91→      </Badge>
+    92→    );
+    93→  }
+    94→  if (status === "done") {
+    95→    return (
+    96→      <Badge className="border-emerald-200 bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
+    97→        مكتمل
+    98→      </Badge>
+    99→    );
+   100→  }
+   101→  if (status === "error") {
+   102→    return <Badge variant="destructive">فشل</Badge>;
+   103→  }
+   104→  if (status === "cancelled") {
+   105→    return <Badge variant="secondary">أُلغي</Badge>;
+   106→  }
+   107→  return <Badge variant="secondary">في الانتظار</Badge>;
+   108→}
+   109→
+   110→function SegmentStatusIcon({ status }: { status: SegmentDTO["status"] }) {
+   111→  switch (status) {
+   112→    case "done":
+   113→      return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden />;
+   114→    case "failed":
+   115→      return <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" aria-hidden />;
+   116→    case "generating":
+   117→    case "fitting":
+   118→      return (
+   119→        <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-amber-600" aria-hidden />
+   120→      );
+   121→    default:
+   122→      return <Clock className="mt-0.5 h-4 w-4 shrink-0 text-stone-400" aria-hidden />;
+   123→  }
+   124→}
+   125→
+   126→export function DubbingStudio() {
+   127→  // Script + parse state
+   128→  const [script, setScript] = useState("");
+   129→  const [parsed, setParsed] = useState<ParseResponse | null>(null);
+   130→  const [parsedScript, setParsedScript] = useState<string | null>(null);
+   131→  const [parsing, setParsing] = useState(false);
+   132→
+   133→  // Settings
+   134→  const [apiKey, setApiKey] = useState(DEFAULT_API_KEY);
+   135→  const [referenceId, setReferenceId] = useState(DEFAULT_REFERENCE_ID);
+   136→  const [prosodySpeed, setProsodySpeed] = useState(1);
+   137→  const [concurrency, setConcurrency] = useState(3);
+   138→  const [settingsOpen, setSettingsOpen] = useState(true);
+   139→
+   140→  // Job state
+   141→  const [starting, setStarting] = useState(false);
+   142→  const [busyAction, setBusyAction] = useState<"cancel" | "retry" | null>(null);
+   143→  const [jobId, setJobId] = useState<string | null>(null);
+   144→  const [job, setJob] = useState<JobDTO | null>(null);
+   145→  const [pollNonce, setPollNonce] = useState(0);
+   146→
+   147→  const audioRef = useRef<HTMLAudioElement | null>(null);
+   148→  const activeRowRef = useRef<HTMLDivElement | null>(null);
+   149→  const doneToastRef = useRef(false);
+   150→  const errorToastRef = useRef(false);
+   151→  const pollFailuresRef = useRef(0);
+   152→
+   153→  const parsedSegments = parsed?.segments ?? [];
+   154→  const scriptChangedAfterParse = parsed !== null && parsedScript !== script;
+   155→  const canGenerate = parsedSegments.length >= 1 && !scriptChangedAfterParse;
+   156→
+   157→  // ---- Polling (1500ms while queued/processing) ----
+   158→  useEffect(() => {
+   159→    if (!jobId) return;
+   160→    let stopped = false;
+   161→    let timer: ReturnType<typeof setTimeout> | undefined;
+   162→
+   163→    const poll = async () => {
+   164→      if (stopped) return;
+   165→      try {
+   166→        const res = await fetch(`/api/jobs/${jobId}`, { cache: "no-store" });
+   167→        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+   168→        const data = (await res.json()) as JobDTO;
+   169→        if (stopped) return;
+   170→        pollFailuresRef.current = 0;
+   171→        setJob(data);
+   172→        if (data.status === "done" && !doneToastRef.current) {
+   173→          doneToastRef.current = true;
+   174→          toast.success("تم إنشاء الملف الصوتي بنجاح");
+   175→        }
+   176→        if (data.status === "error" && !errorToastRef.current) {
+   177→          errorToastRef.current = true;
+   178→          toast.error(data.error ?? "فشل التوليد — يمكنك المحاولة من جديد");
+   179→        }
+   180→        if (data.status === "queued" || data.status === "processing") {
+   181→          timer = setTimeout(() => void poll(), 1500);
+   182→        }
+   183→      } catch {
+   184→        if (stopped) return;
+   185→        pollFailuresRef.current += 1;
+   186→        if (pollFailuresRef.current === 3) {
+   187→          toast.error("تعذر تحديث حالة المهمة — جاري إعادة المحاولة");
+   188→        }
+   189→        if (pollFailuresRef.current < 8) {
+   190→          timer = setTimeout(() => void poll(), 1500);
+   191→        }
+   192→      }
+   193→    };
+   194→
+   195→    void poll();
+   196→    return () => {
+   197→      stopped = true;
+   198→      if (timer) clearTimeout(timer);
+   199→    };
+   200→  }, [jobId, pollNonce]);
+   201→
+   202→  // ---- Auto-scroll to the active (generating/fitting) segment row ----
+   203→  useEffect(() => {
+   204→    if (activeRowRef.current) {
+   205→      activeRowRef.current.scrollIntoView({ block: "nearest", behavior: "smooth" });
+   206→    }
+   207→  }, [job?.segments]);
+   208→
+   209→  // ---- Handlers ----
+   210→  const handleParse = async () => {
+   211→    if (!script.trim()) {
+   212→      toast.error("الصق السكريبت أولًا");
+   213→      return;
+   214→    }
+   215→    setParsing(true);
+   216→    try {
+   217→      const res = await fetch("/api/parse", {
+   218→        method: "POST",
+   219→        headers: { "Content-Type": "application/json" },
+   220→        body: JSON.stringify({ script }),
+   221→      });
+   222→      const data = (await res.json().catch(() => null)) as ParseResponse | null;
+   223→      if (!res.ok || !data || !data.ok) {
+   224→        throw new Error(data?.error ?? `تعذر تحليل السكريبت (HTTP ${res.status})`);
+   225→      }
+   226→      setParsed(data);
+   227→      setParsedScript(script);
+   228→      toast.success(`تم تحليل ${data.segments?.length ?? 0} مقطع`);
+   229→    } catch (e) {
+   230→      setParsed(null);
+   231→      setParsedScript(null);
+   232→      toast.error(e instanceof Error ? e.message : "تعذر تحليل السكريبت");
+   233→    } finally {
+   234→      setParsing(false);
+   235→    }
+   236→  };
+   237→
+   238→  const handleExample = () => {
+   239→    setScript(EXAMPLE_SCRIPT);
+   240→    setParsed(null);
+   241→    setParsedScript(null);
+   242→  };
+   243→
+   244→  const handleClear = () => {
+   245→    setScript("");
+   246→    setParsed(null);
+   247→    setParsedScript(null);
+   248→  };
+   249→
+   250→  const handleGenerate = async () => {
+   251→    if (!canGenerate || starting) return;
+   252→    setStarting(true);
+   253→    try {
+   254→      const res = await fetch("/api/jobs", {
+   255→        method: "POST",
+   256→        headers: { "Content-Type": "application/json" },
+   257→        body: JSON.stringify({ script, apiKey, referenceId, prosodySpeed, concurrency }),
+   258→      });
+   259→      const data = (await res.json().catch(() => null)) as CreateJobResponse | null;
+   260→      if (!res.ok || !data || !data.ok || !data.jobId) {
+   261→        throw new Error(data?.error ?? `تعذر إنشاء المهمة (HTTP ${res.status})`);
+   262→      }
+   263→      doneToastRef.current = false;
+   264→      errorToastRef.current = false;
+   265→      pollFailuresRef.current = 0;
+   266→      setJob(null);
+   267→      setJobId(data.jobId);
+   268→      toast.success("بدأت عملية التوليد — تابِع الحالة من لوحة التقدم");
+   269→    } catch (e) {
+   270→      toast.error(e instanceof Error ? e.message : "تعذر إنشاء المهمة");
+   271→    } finally {
+   272→      setStarting(false);
+   273→    }
+   274→  };
+   275→
+   276→  const handleCancel = async () => {
+   277→    if (!jobId || busyAction) return;
+   278→    setBusyAction("cancel");
+   279→    try {
+   280→      const res = await fetch(`/api/jobs/${jobId}/cancel`, { method: "POST" });
+   281→      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+   282→      const data = (await res.json().catch(() => null)) as { ok?: boolean } | null;
+   283→      if (data && data.ok === false) throw new Error("refused");
+   284→      toast.info("تم إرسال طلب الإيقاف — سيتم إلغاء المهمة حالًا");
+   285→    } catch (e) {
+   286→      toast.error(e instanceof Error ? `تعذر إيقاف المهمة (${e.message})` : "تعذر إيقاف المهمة");
+   287→    } finally {
+   288→      setBusyAction(null);
+   289→    }
+   290→  };
+   291→
+   292→  const handleRetry = async () => {
+   293→    if (!jobId || busyAction) return;
+   294→    setBusyAction("retry");
+   295→    try {
+   296→      const res = await fetch(`/api/jobs/${jobId}/retry`, { method: "POST" });
+   297→      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+   298→      const data = (await res.json().catch(() => null)) as { ok?: boolean } | null;
+   299→      if (data && data.ok === false) throw new Error("refused");
+   300→      toast.info("جاري إعادة المحاولة");
+   301→      doneToastRef.current = false;
+   302→      errorToastRef.current = false;
+   303→      pollFailuresRef.current = 0;
+   304→      setJob((prev) => (prev ? { ...prev, status: "queued", error: null } : prev));
+   305→      setPollNonce((n) => n + 1);
+   306→    } catch (e) {
+   307→      toast.error(e instanceof Error ? `تعذر إعادة المحاولة (${e.message})` : "تعذر إعادة المحاولة");
+   308→    } finally {
+   309→      setBusyAction(null);
+   310→    }
+   311→  };
+   312→
+   313→  const seekTo = (ms: number) => {
+   314→    const el = audioRef.current;
+   315→    if (!el) return;
+   316→    el.currentTime = ms / 1000;
+   317→    void el.play().catch(() => undefined);
+   318→  };
+   319→
+   320→  const parsedWarnings = parsed?.warnings ?? [];
+   321→  const firstStartMs = parsedSegments.length > 0 ? parsedSegments[0].startMs : null;
+   322→  const totalEndMs = parsed?.totalEndMs ?? null;
+   323→
+   324→  const jobActive = job?.status === "queued" || job?.status === "processing";
+   325→  const progressPct =
+   326→    job && job.totalSegments > 0
+   327→      ? Math.min(100, Math.round((job.doneCount / job.totalSegments) * 100))
+   328→      : 0;
+   329→
+   330→  return (
+   331→    <div dir="rtl" lang="ar" className="flex min-h-screen flex-col bg-stone-100">
+   332→      <Toaster richColors position="top-center" />
+   333→
+   334→      {/* Header */}
+   335→      <header className="border-b border-stone-200 bg-stone-50">
+   336→        <div className="mx-auto flex w-full max-w-6xl items-center gap-4 px-4 py-5 sm:py-6">
+   337→          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-700 text-white shadow-sm">
+   338→            <AudioLines className="h-6 w-6" aria-hidden />
+   339→          </div>
+   340→          <div className="min-w-0 flex-1">
+   341→            <div className="flex flex-wrap items-center gap-2">
+   342→              <h1 className="text-xl font-bold text-stone-900 sm:text-2xl">
+   343→                استوديو الدبلجة الآلي
+   344→              </h1>
+   345→              <Badge
+   346→                variant="outline"
+   347→                className="border-emerald-200 bg-emerald-50 text-emerald-700"
+   348→              >
+   349→                <span dir="ltr" className="font-mono text-[11px]">
+   350→                  Fish Audio · s2.1-pro-free
+   351→                </span>
+   352→              </Badge>
+   353→            </div>
+   354→            <p className="mt-1 text-sm leading-relaxed text-stone-500">
+   355→              الصق السكريبت بالفواصل الزمنية — سيتم توليد الصوت لكل مقطع وتركيبه على الخط الزمني
+   356→              بدقة، ثم دمج كل شيء في ملف MP3 واحد
+   357→            </p>
+   358→          </div>
+   359→        </div>
+   360→      </header>
+   361→
+   362→      {/* Main */}
+   363→      <main className="flex-1">
+   364→        <div className="mx-auto grid w-full max-w-6xl grid-cols-1 items-start gap-6 px-4 py-6 lg:grid-cols-5">
+   365→          {/* Left column: script + settings + generate */}
+   366→          <div className="space-y-6 lg:col-span-3">
+   367→            {/* Script card */}
+   368→            <Card className="border-stone-200 bg-white">
+   369→              <CardHeader>
+   370→                <CardTitle className="flex items-center gap-2 text-base">
+   371→                  <FileSearch className="h-4 w-4 text-emerald-600" aria-hidden />
+   372→                  السكريبت
+   373→                </CardTitle>
+   374→                <CardDescription className="text-xs leading-relaxed">
+   375→                  صيغ مدعومة:{" "}
+   376→                  <span dir="ltr" className="font-mono">
+   377→                    [0:00:00.880] text…
+   378→                  </span>{" "}
+   379→                  ·{" "}
+   380→                  <span dir="ltr" className="font-mono">
+   381→                    [0:00:00.880 - 0:00:06.759] text…
+   382→                  </span>{" "}
+   383→                  ·{" "}
+   384→                  <span dir="ltr" className="font-mono">
+   385→                    0:00:00.880 text…
+   386→                  </span>{" "}
+   387→                  · SRT
+   388→                </CardDescription>
+   389→              </CardHeader>
+   390→              <CardContent className="space-y-4">
+   391→                <div className="space-y-2">
+   392→                  <Label htmlFor="narration-script">نص التعليق الصوتي بالفواصل الزمنية</Label>
+   393→                  <Textarea
+   394→                    id="narration-script"
+   395→                    dir="ltr"
+   396→                    value={script}
+   397→                    onChange={(e) => setScript(e.target.value)}
+   398→                    placeholder={"[0:00:00.880] Almost all of us just use Claude as a chatbot.\n[0:00:06.759 - 0:00:14.320] when I let Claude run a complete creative workflow by itself…"}
+   399→                    spellCheck={false}
+   400→                    className="min-h-[280px] resize-y bg-white font-mono text-xs leading-relaxed text-stone-800 placeholder:text-stone-400"
+   401→                  />
+   402→                </div>
+   403→
+   404→                <div className="flex flex-wrap items-center gap-2">
+   405→                  <Button
+   406→                    type="button"
+   407→                    variant="secondary"
+   408→                    onClick={() => void handleParse()}
+   409→                    disabled={parsing || !script.trim()}
+   410→                  >
+   411→                    {parsing ? (
+   412→                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+   413→                    ) : (
+   414→                      <FileSearch className="h-4 w-4" aria-hidden />
+   415→                    )}
+   416→                    تحليل السكريبت
+   417→                  </Button>
+   418→                  <Button type="button" variant="ghost" onClick={handleExample}>
+   419→                    <Sparkles className="h-4 w-4" aria-hidden />
+   420→                    مثال
+   421→                  </Button>
+   422→                  <Button type="button" variant="ghost" onClick={handleClear}>
+   423→                    <Eraser className="h-4 w-4" aria-hidden />
+   424→                    مسح
+   425→                  </Button>
+   426→                </div>
+   427→
+   428→                {scriptChangedAfterParse && (
+   429→                  <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+   430→                    تم تعديل السكريبت بعد آخر تحليل — أعد الضغط على «تحليل السكريبت» قبل بدء التوليد.
+   431→                  </p>
+   432→                )}
+   433→
+   434→                {parsed && !scriptChangedAfterParse && (
+   435→                  <div className="space-y-3">
+   436→                    {/* Summary chips */}
+   437→                    <div className="flex flex-wrap gap-2">
+   438→                      <Badge
+   439→                        variant="outline"
+   440→                        className="border-stone-300 bg-stone-50 text-stone-700"
+   441→                      >
+   442→                        المقاطع: {parsedSegments.length}
+   443→                      </Badge>
+   444→                      <Badge
+   445→                        variant="outline"
+   446→                        className="border-stone-300 bg-stone-50 text-stone-700"
+   447→                      >
+   448→                        بداية أول مقطع:{" "}
+   449→                        <span dir="ltr" className="font-mono">
+   450→                          {firstStartMs != null ? formatMs(firstStartMs) : "—"}
+   451→                        </span>
+   452→                      </Badge>
+   453→                      <Badge
+   454→                        variant="outline"
+   455→                        className="border-stone-300 bg-stone-50 text-stone-700"
+   456→                      >
+   457→                        نهاية الخط الزمني:{" "}
+   458→                        <span dir="ltr" className="font-mono">
+   459→                          {totalEndMs != null ? formatMs(totalEndMs) : "—"}
+   460→                        </span>
+   461→                      </Badge>
+   462→                    </div>
+   463→
+   464→                    {parsedWarnings.length > 0 && (
+   465→                      <Alert className="border-amber-200 bg-amber-50 text-amber-900">
+   466→                        <TriangleAlert className="text-amber-600" aria-hidden />
+   467→                        <AlertTitle>تنبيهات التحليل</AlertTitle>
+   468→                        <AlertDescription>
+   469→                          <ul className="list-inside list-disc space-y-0.5 text-xs">
+   470→                            {parsedWarnings.map((w, i) => (
+   471→                              <li key={i}>{w}</li>
+   472→                            ))}
+   473→                          </ul>
+   474→                        </AlertDescription>
+   475→                      </Alert>
+   476→                    )}
+   477→
+   478→                    {/* Segments preview */}
+   479→                    <ScrollArea className="max-h-80 rounded-md border border-stone-200">
+   480→                      <Table>
+   481→                        <TableHeader>
+   482→                          <TableRow className="bg-stone-50 hover:bg-stone-50">
+   483→                            <TableHead className="w-10 text-center">#</TableHead>
+   484→                            <TableHead className="w-28">البداية</TableHead>
+   485→                            <TableHead className="w-32">النافذة</TableHead>
+   486→                            <TableHead>النص</TableHead>
+   487→                          </TableRow>
+   488→                        </TableHeader>
+   489→                        <TableBody>
+   490→                          {parsedSegments.map((seg) => (
+   491→                            <TableRow key={seg.idx}>
+   492→                              <TableCell className="text-center font-mono text-xs text-stone-400">
+   493→                                {seg.idx + 1}
+   494→                              </TableCell>
+   495→                              <TableCell>
+   496→                                <span dir="ltr" className="font-mono text-xs text-stone-700">
+   497→                                  {formatMs(seg.startMs)}
+   498→                                </span>
+   499→                              </TableCell>
+   500→                              <TableCell>
+   501→                                <span dir="ltr" className="font-mono text-xs text-stone-500">
+   502→                                  {seg.windowEndMs != null ? formatMs(seg.windowEndMs) : "—"}
+   503→                                </span>
+   504→                              </TableCell>
+   505→                              <TableCell>
+   506→                                <div
+   507→                                  className="max-w-[280px] truncate text-xs text-stone-500"
+   508→                                  title={seg.text}
+   509→                                >
+   510→                                  {seg.text || "—"}
+   511→                                </div>
+   512→                              </TableCell>
+   513→                            </TableRow>
+   514→                          ))}
+   515→                        </TableBody>
+   516→                      </Table>
+   517→                    </ScrollArea>
+   518→                  </div>
+   519→                )}
+   520→              </CardContent>
+   521→            </Card>
+   522→
+   523→            {/* Settings card */}
+   524→            <Collapsible open={settingsOpen} onOpenChange={setSettingsOpen} asChild>
+   525→              <Card className="border-stone-200 bg-white">
+   526→              <CardHeader>
+   527→                <div className="flex items-center justify-between gap-2">
+   528→                  <div className="flex items-center gap-2">
+   529→                    <Settings2 className="h-4 w-4 text-emerald-600" aria-hidden />
+   530→                    <CardTitle className="text-base">الإعدادات</CardTitle>
+   531→                  </div>
+   532→                  <CollapsibleTrigger asChild>
+   533→                    <Button
+   534→                      type="button"
+   535→                      variant="ghost"
+   536→                      size="sm"
+   537→                      className="h-8 w-8 p-0"
+   538→                      aria-label={settingsOpen ? "إخفاء الإعدادات" : "إظهار الإعدادات"}
+   539→                    >
+   540→                      <ChevronDown
+   541→                        className={cn(
+   542→                          "h-4 w-4 transition-transform",
+   543→                          settingsOpen && "rotate-180"
+   544→                        )}
+   545→                        aria-hidden
+   546→                      />
+   547→                    </Button>
+   548→                  </CollapsibleTrigger>
+   549→                </div>
+   550→                <CardDescription className="text-xs">
+   551→                  مفتاح API والصوت المرجعي وسرعة النطق — القيم الافتراضية جاهزة للاستخدام
+   552→                </CardDescription>
+   553→              </CardHeader>
+   554→              <CollapsibleContent>
+   555→                <CardContent className="space-y-5">
+   556→                    <div className="space-y-2">
+   557→                      <Label htmlFor="api-key">مفتاح Fish Audio API</Label>
+   558→                      <Input
+   559→                        id="api-key"
+   560→                        type="password"
+   561→                        dir="ltr"
+   562→                        value={apiKey}
+   563→                        onChange={(e) => setApiKey(e.target.value)}
+   564→                        className="bg-white font-mono text-xs"
+   565→                        autoComplete="off"
+   566→                      />
+   567→                    </div>
+   568→                    <div className="space-y-2">
+   569→                      <Label htmlFor="reference-id">المعرف المرجعي (Reference ID)</Label>
+   570→                      <Input
+   571→                        id="reference-id"
+   572→                        dir="ltr"
+   573→                        value={referenceId}
+   574→                        onChange={(e) => setReferenceId(e.target.value)}
+   575→                        className="bg-white font-mono text-xs"
+   576→                        autoComplete="off"
+   577→                      />
+   578→                    </div>
+   579→
+   580→                    <Separator className="bg-stone-200" />
+   581→
+   582→                    <div className="space-y-3">
+   583→                      <div className="flex items-center justify-between gap-2">
+   584→                        <Label htmlFor="prosody-speed">سرعة النطق الأساسية</Label>
+   585→                        <Badge
+   586→                          variant="outline"
+   587→                          dir="ltr"
+   588→                          className="border-stone-300 bg-stone-50 font-mono text-xs text-stone-700"
+   589→                        >
+   590→                          ×{prosodySpeed.toFixed(2)}
+   591→                        </Badge>
+   592→                      </div>
+   593→                      <Slider
+   594→                        id="prosody-speed"
+   595→                        aria-label="سرعة النطق الأساسية"
+   596→                        value={[prosodySpeed]}
+   597→                        onValueChange={(v) => setProsodySpeed(v[0] ?? 1)}
+   598→                        min={0.5}
+   599→                        max={2}
+   600→                        step={0.05}
+   601→                      />
+   602→                    </div>
+   603→
+   604→                    <div className="space-y-3">
+   605→                      <div className="flex items-center justify-between gap-2">
+   606→                        <Label htmlFor="concurrency">التوليد المتوازي</Label>
+   607→                        <Badge
+   608→                          variant="outline"
+   609→                          dir="ltr"
+   610→                          className="border-stone-300 bg-stone-50 font-mono text-xs text-stone-700"
+   611→                        >
+   612→                          {concurrency}
+   613→                        </Badge>
+   614→                      </div>
+   615→                      <Slider
+   616→                        id="concurrency"
+   617→                        aria-label="التوليد المتوازي"
+   618→                        value={[concurrency]}
+   619→                        onValueChange={(v) => setConcurrency(v[0] ?? 3)}
+   620→                        min={1}
+   621→                        max={5}
+   622→                        step={1}
+   623→                      />
+   624→                    </div>
+   625→
+   626→                    <p className="text-xs leading-relaxed text-stone-500">
+   627→                      ثابتة:{" "}
+   628→                      <span dir="ltr" className="font-mono">
+   629→                        temperature {FISH_CONFIG.temperature} · top_p {FISH_CONFIG.topP} · MP3
+   630→                        44.1kHz mono · 128kbps
+   631→                      </span>{" "}
+   632→                      · تسريع تلقائي عند التجاوز · ضبط رنانة −16 LUFS
+   633→                    </p>
+   634→                </CardContent>
+   635→              </CollapsibleContent>
+   636→              </Card>
+   637→            </Collapsible>
+   638→
+   639→            {/* Generate card */}
+   640→            <Card className="border-stone-200 bg-white">
+   641→              <CardHeader>
+   642→                <CardTitle className="flex items-center gap-2 text-base">
+   643→                  <Play className="h-4 w-4 text-emerald-600" aria-hidden />
+   644→                  التوليد
+   645→                </CardTitle>
+   646→                <CardDescription className="text-xs">
+   647→                  يتم توليد كل مقطع بصوتك المرجعي، وملاءمته لنافذته الزمنية تلقائيًا، ثم دمج
+   648→                  المقاطع كلها في ملف MP3 واحد
+   649→                </CardDescription>
+   650→              </CardHeader>
+   651→              <CardContent>
+   652→                <Button
+   653→                  type="button"
+   654→                  onClick={() => void handleGenerate()}
+   655→                  disabled={!canGenerate || starting}
+   656→                  className="h-12 w-full bg-emerald-600 text-base text-white hover:bg-emerald-700"
+   657→                >
+   658→                  {starting ? (
+   659→                    <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+   660→                  ) : (
+   661→                    <Play className="h-5 w-5" aria-hidden />
+   662→                  )}
+   663→                  بدء التوليد
+   664→                </Button>
+   665→                {!canGenerate && (
+   666→                  <p className="mt-2 text-center text-xs text-stone-400">
+   667→                    حلّل السكريبت أولًا لتفعيل زر التوليد
+   668→                  </p>
+   669→                )}
+   670→              </CardContent>
+   671→            </Card>
+   672→          </div>
+   673→
+   674→          {/* Right column: progress + result */}
+   675→          <div className="space-y-6 lg:col-span-2">
+   676→            {/* Progress card */}
+   677→            {jobId && (
+   678→              <Card className="border-stone-200 bg-white">
+   679→                <CardHeader>
+   680→                  <div className="flex items-center justify-between gap-2">
+   681→                    <CardTitle className="flex items-center gap-2 text-base">
+   682→                      <Activity className="h-4 w-4 text-emerald-600" aria-hidden />
+   683→                      التقدم
+   684→                    </CardTitle>
+   685→                    {job ? (
+   686→                      <JobStatusBadge status={job.status} />
+   687→                    ) : (
+   688→                      <Badge variant="secondary">
+   689→                        <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+   690→                        تحميل…
+   691→                      </Badge>
+   692→                    )}
+   693→                  </div>
+   694→                  <CardDescription className="text-xs">
+   695→                    توليد المقاطع وملاءمتها للنوافذ الزمنية ثم الدمج النهائي
+   696→                  </CardDescription>
+   697→                </CardHeader>
+   698→                <CardContent className="space-y-4">
+   699→                  <div role="status" className="space-y-2">
+   700→                    <div dir="ltr">
+   701→                      <Progress
+   702→                        value={progressPct}
+   703→                        className="bg-stone-200 [&>[data-slot=progress-indicator]]:bg-emerald-600"
+   704→                        aria-label="نسبة إنجاز التوليد"
+   705→                      />
+   706→                    </div>
+   707→                    <div className="flex items-center justify-between gap-2 text-xs text-stone-600">
+   708→                      <span>
+   709→                        مقطع {job?.doneCount ?? 0} من {job?.totalSegments ?? 0}
+   710→                      </span>
+   711→                      <span dir="ltr" className="font-mono">
+   712→                        {progressPct}%
+   713→                      </span>
+   714→                    </div>
+   715→                    {job && job.failedCount > 0 && (
+   716→                      <p className="text-xs text-red-600">مقاطع فاشلة: {job.failedCount}</p>
+   717→                    )}
+   718→                    {job?.status === "error" && job.error && (
+   719→                      <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-700">
+   720→                        {job.error}
+   721→                      </p>
+   722→                    )}
+   723→                  </div>
+   724→
+   725→                  {(jobActive || job?.status === "error") && (
+   726→                    <div className="flex flex-wrap gap-2">
+   727→                      {jobActive && (
+   728→                        <Button
+   729→                          type="button"
+   730→                          variant="outline"
+   731→                          onClick={() => void handleCancel()}
+   732→                          disabled={busyAction !== null}
+   733→                          className="border-stone-300 bg-white text-stone-700 hover:bg-stone-50"
+   734→                        >
+   735→                          {busyAction === "cancel" ? (
+   736→                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+   737→                          ) : (
+   738→                            <Square className="h-4 w-4" aria-hidden />
+   739→                          )}
+   740→                          إيقاف
+   741→                        </Button>
+   742→                      )}
+   743→                      {job?.status === "error" && (
+   744→                        <Button
+   745→                          type="button"
+   746→                          variant="outline"
+   747→                          onClick={() => void handleRetry()}
+   748→                          disabled={busyAction !== null}
+   749→                          className="border-stone-300 bg-white text-stone-700 hover:bg-stone-50"
+   750→                        >
+   751→                          {busyAction === "retry" ? (
+   752→                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+   753→                          ) : (
+   754→                            <RotateCcw className="h-4 w-4" aria-hidden />
+   755→                          )}
+   756→                          إعادة المحاولة
+   757→                        </Button>
+   758→                      )}
+   759→                    </div>
+   760→                  )}
+   761→
+   762→                  {job && (
+   763→                    <div className="space-y-1.5">
+   764→                      <p className="flex items-center gap-1.5 text-xs font-medium text-stone-500">
+   765→                        <ListMusic className="h-3.5 w-3.5" aria-hidden />
+   766→                        المقاطع ({job.segments.length})
+   767→                      </p>
+   768→                      <ScrollArea className="max-h-96 rounded-md border border-stone-200 bg-stone-50/50">
+   769→                        <div className="divide-y divide-stone-100 px-2 py-1">
+   770→                          {job.segments.map((seg) => {
+   771→                            const active =
+   772→                              seg.status === "generating" || seg.status === "fitting";
+   773→                            return (
+   774→                              <div
+   775→                                key={seg.idx}
+   776→                                ref={active ? activeRowRef : undefined}
+   777→                                className={cn(
+   778→                                  "flex items-start gap-2 px-1.5 py-2",
+   779→                                  active && "rounded-md bg-amber-50"
+   780→                                )}
+   781→                              >
+   782→                                <span
+   783→                                  dir="ltr"
+   784→                                  className="w-8 shrink-0 pt-0.5 text-right font-mono text-xs text-stone-400"
+   785→                                >
+   786→                                  {seg.idx + 1}
+   787→                                </span>
+   788→                                <span
+   789→                                  dir="ltr"
+   790→                                  className="w-[86px] shrink-0 pt-0.5 font-mono text-xs text-stone-500"
+   791→                                >
+   792→                                  {formatMs(seg.startMs)}
+   793→                                </span>
+   794→                                <SegmentStatusIcon status={seg.status} />
+   795→                                <div className="min-w-0 flex-1">
+   796→                                  <p className="truncate text-xs text-stone-700" title={seg.text}>
+   797→                                    {seg.text || "—"}
+   798→                                  </p>
+   799→                                  {seg.status === "done" && (
+   800→                                    <p className="mt-0.5 text-xs text-stone-500">
+   801→                                      <span dir="ltr" className="font-mono">
+   802→                                        {seg.durationMs != null
+   803→                                          ? formatShort(seg.durationMs)
+   804→                                          : "—"}
+   805→                                      </span>
+   806→                                      {seg.windowEndMs != null && (
+   807→                                        <span dir="ltr" className="font-mono text-stone-400">
+   808→                                          {" / "}
+   809→                                          {((seg.windowEndMs - seg.startMs) / 1000).toFixed(1)}s
+   810→                                        </span>
+   811→                                      )}
+   812→                                    </p>
+   813→                                  )}
+   814→                                  {seg.error && (
+   815→                                    <p className="mt-0.5 text-xs text-red-600">{seg.error}</p>
+   816→                                  )}
+   817→                                  {seg.note && (
+   818→                                    <p
+   819→                                      className="mt-0.5 truncate text-xs text-stone-400"
+   820→                                      title={seg.note}
+   821→                                    >
+   822→                                      {seg.note}
+   823→                                    </p>
+   824→                                  )}
+   825→                                </div>
+   826→                              </div>
+   827→                            );
+   828→                          })}
+   829→                        </div>
+   830→                      </ScrollArea>
+   831→                    </div>
+   832→                  )}
+   833→                </CardContent>
+   834→              </Card>
+   835→            )}
+   836→
+   837→            {/* Result card */}
+   838→            {jobId && job?.status === "done" && (
+   839→              <Card className="border-stone-200 bg-white">
+   840→                <CardHeader>
+   841→                  <CardTitle className="flex items-center gap-2 text-base">
+   842→                    <FileAudio className="h-4 w-4 text-emerald-600" aria-hidden />
+   843→                    النتيجة
+   844→                  </CardTitle>
+   845→                  <CardDescription className="text-xs">
+   846→                    الملف النهائي المدموج — جاهز للتحميل أو التشغيل مباشرة
+   847→                  </CardDescription>
+   848→                </CardHeader>
+   849→                <CardContent className="space-y-4">
+   850→                  <audio
+   851→                    ref={audioRef}
+   852→                    controls
+   853→                    preload="metadata"
+   854→                    className="w-full"
+   855→                    src={`/api/jobs/${jobId}/audio`}
+   856→                  />
+   857→
+   858→                  <div className="flex items-center justify-between gap-2 text-sm">
+   859→                    <span className="text-stone-500">المدة النهائية</span>
+   860→                    <span dir="ltr" className="font-mono text-sm text-stone-700">
+   861→                      {job.totalDurationMs != null ? formatMs(job.totalDurationMs) : "—"}
+   862→                    </span>
+   863→                  </div>
+   864→
+   865→                  <Button
+   866→                    asChild
+   867→                    className="h-11 w-full bg-emerald-600 text-white hover:bg-emerald-700"
+   868→                  >
+   869→                    <a href={`/api/jobs/${jobId}/audio?dl=1`} download>
+   870→                      <Download className="h-4 w-4" aria-hidden />
+   871→                      تحميل MP3
+   872→                    </a>
+   873→                  </Button>
+   874→
+   875→                  <div className="space-y-2">
+   876→                    <p className="text-xs font-medium text-stone-500">
+   877→                      الخط الزمني — انقر أي مقطع للانتقال إليه
+   878→                    </p>
+   879→                    <div
+   880→                      dir="ltr"
+   881→                      className="relative h-14 overflow-hidden rounded-md bg-stone-200"
+   882→                    >
+   883→                      {(() => {
+   884→                        const total = job.totalDurationMs ?? 0;
+   885→                        if (total <= 0) return null;
+   886→                        return job.segments.map((seg) => {
+   887→                          const leftPct = (seg.startMs / total) * 100;
+   888→                          const rawWidthMs = Math.max(
+   889→                            (seg.windowEndMs ?? seg.durationMs ?? 500) - seg.startMs,
+   890→                            300
+   891→                          );
+   892→                          const widthPct = Math.min(
+   893→                            (rawWidthMs / total) * 100,
+   894→                            100 - leftPct
+   895→                          );
+   896→                          if (widthPct <= 0) return null;
+   897→                          return (
+   898→                            <div
+   899→                              key={seg.idx}
+   900→                              role="button"
+   901→                              tabIndex={0}
+   902→                              title={`#${seg.idx + 1} · ${formatMs(seg.startMs)}`}
+   903→                              aria-label={`الانتقال إلى المقطع ${seg.idx + 1} عند ${formatMs(seg.startMs)}`}
+   904→                              onClick={() => seekTo(seg.startMs)}
+   905→                              onKeyDown={(e) => {
+   906→                                if (e.key === "Enter" || e.key === " ") {
+   907→                                  e.preventDefault();
+   908→                                  seekTo(seg.startMs);
+   909→                                }
+   910→                              }}
+   911→                              className="absolute top-3 h-8 cursor-pointer rounded-sm bg-emerald-500/70 transition-colors hover:bg-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700"
+   912→                              style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+   913→                            />
+   914→                          );
+   915→                        });
+   916→                      })()}
+   917→                    </div>
+   918→                  </div>
+   919→                </CardContent>
+   920→              </Card>
+   921→            )}
+   922→
+   923→            {!jobId && (
+   924→              <Card className="border-dashed border-stone-300 bg-white/60">
+   925→                <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
+   926→                  <AudioLines className="h-8 w-8 text-stone-300" aria-hidden />
+   927→                  <p className="text-sm font-medium text-stone-500">لا توجد مهمة بعد</p>
+   928→                  <p className="text-xs leading-relaxed text-stone-400">
+   929→                    حلّل السكريبت واضغط «بدء التوليد» وستظهر هنا حالة التقدم والنتيجة النهائية
+   930→                  </p>
+   931→                </CardContent>
+   932→              </Card>
+   933→            )}
+   934→          </div>
+   935→        </div>
+   936→      </main>
+   937→
+   938→      {/* Footer */}
+   939→      <footer className="mt-auto border-t border-stone-200 bg-stone-50 pb-[max(1rem,env(safe-area-inset-bottom))]">
+   940→        <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-between gap-2 px-4 py-4 text-xs text-stone-500 sm:flex-row">
+   941→          <p>يعمل بـ Fish Audio TTS · MP3 واحد نهائي 44.1kHz · 128kbps</p>
+   942→          <a
+   943→            href="/voiceover_final.mp3"
+   944→            className="underline decoration-stone-300 underline-offset-4 transition-colors hover:text-emerald-700"
+   945→          >
+   946→            نتيجة المشروع السابق (6:52)
+   947→          </a>
+   948→        </div>
+   949→      </footer>
+   950→    </div>
+   951→  );
+   952→}
+   953→
+   954→export default DubbingStudio;
+   955→

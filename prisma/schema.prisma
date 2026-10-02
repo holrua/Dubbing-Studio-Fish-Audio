@@ -1,0 +1,66 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Post {
+  id        String   @id @default(cuid())
+  title     String
+  content   String?
+  published Boolean  @default(false)
+  authorId  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Automatic dubbing studio: one job = one script converted into one merged MP3
+model DubbingJob {
+  id              String           @id @default(cuid())
+  status          String           @default("queued") // queued | processing | done | error | cancelled
+  script          String
+  settings        String // JSON: { apiKey, referenceId, model, prosodySpeed, concurrency }
+  totalDurationMs Int?
+  error           String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  segments        DubbingSegment[]
+}
+
+model DubbingSegment {
+  id            String      @id @default(cuid())
+  jobId         String
+  job           DubbingJob  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  idx           Int
+  startMs       Int
+  endMs         Int? // explicit end timestamp from the script (if provided)
+  windowEndMs   Int? // placement boundary: explicit end or next segment start
+  text          String
+  status        String      @default("pending") // pending | generating | fitting | done | failed
+  genDurationMs Int? // raw TTS duration (ms) at base prosody speed
+  durationMs    Int? // final fitted duration (ms)
+  prosodySpeed  Float?
+  atempo        Float?
+  attempts      Int         @default(0)
+  error         String?
+  note          String? // action description, e.g. "regen speed 1.3 + atempo 1.05"
+
+  @@index([jobId])
+}
