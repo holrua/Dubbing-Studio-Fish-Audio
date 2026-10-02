@@ -1,0 +1,17 @@
+node_modules
+.next
+.git
+.env*
+output
+db
+dev.log
+server.log
+*.log
+tool-results
+agent-ctx
+.zscripts
+skills
+worklog.md
+Dockerfile
+.dockerignore
+README.md
